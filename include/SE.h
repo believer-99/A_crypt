@@ -1,11 +1,16 @@
 #pragma once
 
-#include<bits/stdc++.h>
+#include <vector>
+#include <string>
+#include <unordered_map>
 #include <cstdint>
+#include <cstdint>
+#include <AES.h>
 
 class SE
 {
     private:
+        AES aes;
         std::vector<uint8_t> key;
         std::unordered_map<std::string,std::vector<std::string>>encryptedIndex;
 
@@ -15,6 +20,6 @@ class SE
         public:
         SE(const std::vector<uint8_t>& key);
 
-        void addDocument(const std::string& docID, const std::vector<std::string>& keywords);
+        void add(const std::string& keyword, const std::vector<std::string>& docId);
         std::vector<std::string> search(const std::string& keyword);
 };
