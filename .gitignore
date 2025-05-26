@@ -1,0 +1,34 @@
+# Build directory
+/build/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# Executables
+/main
+/se_test
+
+# Object files
+*.o
+*.obj
+
+# IDE specific
+.vscode/
+.idea/
+*.code-workspace
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Logs and temporary files
+*.log
+*.tmp
+
+# Dependency metadata
+compile_commands.json
+
+# Backup files
+*~
+*.bak
