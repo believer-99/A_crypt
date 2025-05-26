@@ -29,4 +29,15 @@ std::vector<std::string> SE::search(const std::string& keyword) {
     }
     return {};
 }
+std::string SE::encryptKeyword(const std::string& keyword) {
+    std::vector<uint8_t> input(keyword.begin(), keyword.end());
+    auto encrypted = aes.encrypt(input); 
+    return convert_to_hex(encrypted);
+}
+
+std::string SE::encryptDocID(const std::string& docID) {
+    std::vector<uint8_t> input(docID.begin(), docID.end());
+    auto encrypted = aes.encrypt(input);
+    return convert_to_hex(encrypted);
+}
 
