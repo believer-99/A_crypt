@@ -1,31 +1,30 @@
-#include "FHE/FHE.h"
 #include <iostream>
-
-using namespace hybridcrypto::fhe;
+#include "../include/FHE/FHE_utils.hpp"
 
 int main() {
-    FHE fhe;
-    int original = 5;
-    fhe.encryptInteger(original);
-    std::cout << "Encrypted: " << original << std::endl;
+    std::cout << "[+] Initializing FHE Utilities...\n";
+    FHEUtils fhe;
 
-    int to_add = 3;
-    fhe.addEncrypted(to_add);
-    std::cout << "Added: " << to_add << std::endl;
+    int64_t num1 = 25;
+    int64_t num2 = 17;
 
-    int to_multiply = 2;
-    fhe.multiplyEncrypted(to_multiply);
-    std::cout << "Multiplied by: " << to_multiply << std::endl;
+    std::cout << "[+] Encrypting numbers: " << num1 << " and " << num2 << std::endl;
 
-    fhe.decryptInteger();
-    int result = fhe.getDecryptedValue();
-    std::cout << "Decrypted result: " << result << std::endl;
+    seal::Ciphertext enc1 = fhe.encrypt(num1);
+    seal::Ciphertext enc2 = fhe.encrypt(num2);
 
-    int expected = (original + to_add) * to_multiply;
-    if (result == expected) {
-        std::cout << "Test Passed: " << result << " == " << expected << std::endl;
+    std::cout << "[+] Performing homomorphic addition...\n";
+    seal::Ciphertext encrypted_result = fhe.add(enc1, enc2);
+
+    std::cout << "[+] Decrypting the result...\n";
+    int64_t decrypted_result = fhe.decrypt(encrypted_result);
+
+    std::cout << "[+] Decrypted Result: " << decrypted_result << std::endl;
+
+    if (decrypted_result == (num1 + num2)) {
+        std::cout << "[✔] Test Passed! Encrypted addition worked as expected.\n";
     } else {
-        std::cout << "Test Failed: Got " << result << ", expected " << expected << std::endl;
+        std::cout << "[✘] Test Failed! Expected " << (num1 + num2) << " but got " << decrypted_result << "\n";
     }
 
     return 0;
