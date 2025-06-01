@@ -1,4 +1,4 @@
-#include "../include/FHE/FHE_utils.hpp"
+#include "FHE/FHE_utils.hpp"
 #include <iostream>
 
 using namespace seal;
