@@ -1,76 +1,59 @@
+// src/SE.cpp
 #include "SE.h"
-#include <sstream>
-#include <iomanip>
+#include "utils/String_utils.h" 
 #include <stdexcept>
+#include <vector>
+#include <string>
 
-std::string convert_to_hex(const std::vector<uint8_t>& data) {
-    std::ostringstream oss;
-    oss << std::hex;
-    for (const auto& byte : data) {
-        oss << std::setw(2) << std::setfill('0') << static_cast<int>(byte);
-    }
-    return oss.str();
-}
-
-std::vector<uint8_t> SE::convert_from_hex(const std::string& hex_str) {
-    if (hex_str.length() % 2 != 0) {
-        throw std::invalid_argument("Hex string must have an even number of characters.");
-    }
-    std::vector<uint8_t> bytes;
-    bytes.reserve(hex_str.length() / 2);
-    for (unsigned int i = 0; i < hex_str.length(); i += 2) {
-        std::string byteString = hex_str.substr(i, 2);
-        try {
-            uint8_t byte = static_cast<uint8_t>(std::stoul(byteString, nullptr, 16));
-            bytes.push_back(byte);
-        } catch (const std::invalid_argument& e) {
-            throw std::invalid_argument("Invalid hex character in string: " + byteString + " (" + e.what() + ")");
-        } catch (const std::out_of_range& e) {
-            throw std::out_of_range("Hex value out of range: " + byteString + " (" + e.what() + ")");
-        }
-    }
-    return bytes;
-}
 
 std::string SE::convert_bytes_to_string(const std::vector<uint8_t>& data) {
     return std::string(data.begin(), data.end());
 }
 
-SE::SE(const std::vector<uint8_t>& key_param) : aes(key_param) {} 
+SE::SE(const std::vector<uint8_t>& key_param) 
+    : aes(key_param), fixed_sse_iv_(GCM_IV_SIZE, 0x00) {
+    if (fixed_sse_iv_.size() != GCM_IV_SIZE) {
+        throw std::logic_error("SE fixed IV size mismatch with GCM_IV_SIZE.");
+    }
+}
 
 void SE::add(const std::string& keyword, const std::vector<std::string>& docIDs) {
-    std::string encryptedKeywordHex = encryptKeyword(keyword);
-    if (encryptedIndex.find(encryptedKeywordHex) == encryptedIndex.end()) {
-        encryptedIndex[encryptedKeywordHex] = {};
-    }
+    std::string encryptedKeywordBase64 = encryptKeyword(keyword);
+    auto& id_list = encryptedIndex[encryptedKeywordBase64]; 
+
     for (const auto& docID : docIDs) {
-        std::string encryptedDocIDHex = encryptDocID(docID);
-        encryptedIndex[encryptedKeywordHex].push_back(encryptedDocIDHex);
+        std::string encryptedDocIDBase64 = encryptDocID(docID);
+        id_list.push_back(encryptedDocIDBase64);
     }
 }
 
 std::vector<std::string> SE::search(const std::string& keyword) {
-    std::string encryptedKeywordHex = encryptKeyword(keyword);
-    if (encryptedIndex.count(encryptedKeywordHex)) {
-        return encryptedIndex[encryptedKeywordHex];
+    std::string encryptedKeywordBase64 = encryptKeyword(keyword);
+    auto it = encryptedIndex.find(encryptedKeywordBase64);
+    if (it != encryptedIndex.end()) {
+        return it->second;
     }
     return {};
 }
 
-std::string SE::decryptDocIDFromHex(const std::string& hex_encrypted_docID) {
-    std::vector<uint8_t> encrypted_docID_bytes = convert_from_hex(hex_encrypted_docID);
-    std::vector<uint8_t> decrypted_docID_bytes = aes.decrypt(encrypted_docID_bytes);
+std::string SE::decryptDocIDFromBase64(const std::string& base64_encrypted_docID) {
+    std::vector<uint8_t> iv_ciphertext_tag_blob = StringUtils::base64_decode(base64_encrypted_docID);
+    
+    std::vector<uint8_t> decrypted_docID_bytes = aes.decrypt(iv_ciphertext_tag_blob);
+    
     return convert_bytes_to_string(decrypted_docID_bytes);
 }
 
 std::string SE::encryptKeyword(const std::string& keyword) {
     std::vector<uint8_t> input(keyword.begin(), keyword.end());
-    auto encrypted_bytes = aes.encrypt(input);
-    return convert_to_hex(encrypted_bytes);
+    std::vector<uint8_t> encrypted_blob = aes.encrypt_deterministic(input, fixed_sse_iv_);
+    
+    return StringUtils::base64_encode(encrypted_blob);
 }
 
 std::string SE::encryptDocID(const std::string& docID) {
     std::vector<uint8_t> input(docID.begin(), docID.end());
-    auto encrypted_bytes = aes.encrypt(input);
-    return convert_to_hex(encrypted_bytes);
+    std::vector<uint8_t> encrypted_blob = aes.encrypt_deterministic(input, fixed_sse_iv_);
+
+    return StringUtils::base64_encode(encrypted_blob);
 }
