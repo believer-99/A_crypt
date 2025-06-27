@@ -1,15 +1,14 @@
-
 #include <iostream>
 #include <vector>
 #include <string>
 #include <map>
 #include <stdexcept>
+#include <algorithm> 
 
-#include "AES.h"      
-#include "SE.h"          
+#include "AES.h"           
+#include "SE.h"           
 #include "FHE/FHE_utils.hpp" 
 
-// Simple assertion function
 void assert_hybrid_true(bool condition, const std::string& test_name) {
     if (!condition) {
         std::cerr << "[HYBRID TEST FAILED] " << test_name << std::endl;
@@ -20,45 +19,47 @@ void assert_hybrid_true(bool condition, const std::string& test_name) {
 
 int main() {
     try {
-        std::cout << "--- Running Hybrid SSE-FHE Test ---" << std::endl;
+        std::cout << "--- Running Hybrid SSE-FHE Test (AES-256-GCM) ---" << std::endl;
 
-        std::vector<uint8_t> sse_aes_key = {0x00, 0xAA, 0xBB, 0xCC}; 
+        std::vector<uint8_t> sse_aes_key(AES_256_KEY_SIZE); 
+        for(size_t i = 0; i < AES_256_KEY_SIZE; ++i) sse_aes_key[i] = static_cast<uint8_t>(i + 200); 
+        
         SE se_service(sse_aes_key);
-
-        FHEUtils fhe_manager; 
+        FHEUtils fhe_manager;
 
         std::map<std::string, seal::Ciphertext> user_encrypted_scores;
         std::map<std::string, int64_t> user_plain_scores;
 
-        user_plain_scores["user1"] = 100;
-        user_encrypted_scores["user1"] = fhe_manager.encrypt(user_plain_scores["user1"]);
-        se_service.add("genre:sci-fi", {"user1"});
-        se_service.add("platform:pc", {"user1"});
+        user_plain_scores["user_alpha"] = 100;
+        user_encrypted_scores["user_alpha"] = fhe_manager.encrypt(user_plain_scores["user_alpha"]);
+        se_service.add("interest:gadgets", {"user_alpha"});
+        se_service.add("region:north", {"user_alpha"});
 
-        user_plain_scores["user2"] = 150;
-        user_encrypted_scores["user2"] = fhe_manager.encrypt(user_plain_scores["user2"]);
-        se_service.add("genre:fantasy", {"user2"});
-        se_service.add("platform:console", {"user2"});
+        user_plain_scores["user_beta"] = 150;
+        user_encrypted_scores["user_beta"] = fhe_manager.encrypt(user_plain_scores["user_beta"]);
+        se_service.add("interest:books", {"user_beta"});
+        se_service.add("region:south", {"user_beta"});
         
-        user_plain_scores["user3"] = 120;
-        user_encrypted_scores["user3"] = fhe_manager.encrypt(user_plain_scores["user3"]);
-        se_service.add("genre:sci-fi", {"user3"});
-        se_service.add("platform:console", {"user3"});
+        user_plain_scores["user_gamma"] = 120;
+        user_encrypted_scores["user_gamma"] = fhe_manager.encrypt(user_plain_scores["user_gamma"]);
+        se_service.add("interest:gadgets", {"user_gamma"}); 
+        se_service.add("region:north", {"user_gamma"});
 
         std::cout << "[+] Data populated into SSE and FHE-encrypted scores stored." << std::endl;
-        std::string query_keyword = "genre:sci-fi";
+
+        std::string query_keyword = "interest:gadgets";
         std::cout << "[+] Searching SSE for keyword: " << query_keyword << std::endl;
         
-        std::vector<std::string> hex_encrypted_user_ids = se_service.search(query_keyword);
+        std::vector<std::string> base64_encrypted_user_ids = se_service.search(query_keyword);
         
         std::vector<std::string> plain_user_ids;
-        std::cout << "[+] Found " << hex_encrypted_user_ids.size() << " encrypted user ID(s). Decrypting them..." << std::endl;
-        for (const auto& hex_id : hex_encrypted_user_ids) {
-            plain_user_ids.push_back(se_service.decryptDocIDFromHex(hex_id));
+        std::cout << "[+] Found " << base64_encrypted_user_ids.size() << " encrypted user ID(s). Decrypting them..." << std::endl;
+        for (const auto& base64_id : base64_encrypted_user_ids) { 
+            plain_user_ids.push_back(se_service.decryptDocIDFromBase64(base64_id)); 
         }
         
         std::sort(plain_user_ids.begin(), plain_user_ids.end());
-        std::vector<std::string> expected_user_ids = {"user1", "user3"};
+        std::vector<std::string> expected_user_ids = {"user_alpha", "user_gamma"};
         std::sort(expected_user_ids.begin(), expected_user_ids.end());
         assert_hybrid_true(plain_user_ids == expected_user_ids, "SSE search and decryption of user IDs");
         for(const auto& id : plain_user_ids) std::cout << "  - Decrypted User ID: " << id << std::endl;
@@ -80,7 +81,6 @@ int main() {
                 }
             }
 
-            // Decryption and Verification
             int64_t decrypted_total_score = fhe_manager.decrypt(total_score_ct);
             std::cout << "[+] Decrypted total score: " << decrypted_total_score << std::endl;
             std::cout << "[+] Expected plain total score: " << expected_plain_sum << std::endl;
