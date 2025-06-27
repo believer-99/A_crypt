@@ -2,28 +2,23 @@
 
 #include <vector>
 #include <string>
-#include <unordered_map>
-#include <cstdint>
-#include "AES.h" // Uses the new AES.h
+#include "AES.h"
+#include <SQLiteCpp/SQLiteCpp.h>
 
-class SE {
+class SE
+{
 private:
-    AES aes; 
-    std::unordered_map<std::string, std::vector<std::string>> encryptedIndex;
+    AES aes;
+    std::unique_ptr<SQLite::Database> db;
+    std::vector<uint8_t> derive_iv(const std::string &input);
 
-    // These will now use aes.encrypt_deterministic() and return Base64 of (IV || CT || Tag)
-    std::string encryptKeyword(const std::string& keyword);
-    std::string encryptDocID(const std::string& docID);
-
-    const std::vector<uint8_t> fixed_sse_iv_;
-
-    static std::string convert_bytes_to_string(const std::vector<uint8_t>& data);
+    std::string encryptKeyword(const std::string &keyword);
+    std::string encryptDocID(const std::string &docID);
+    static std::string convert_bytes_to_string(const std::vector<uint8_t> &data);
 
 public:
-    SE(const std::vector<uint8_t>& key);
-
-    void add(const std::string& keyword, const std::vector<std::string>& docIDs);
-    std::vector<std::string> search(const std::string& keyword);
-
-    std::string decryptDocIDFromBase64(const std::string& base64_encrypted_docID);
+    SE(const std::vector<uint8_t> &key, const std::string &db_path = "sse_index.db");
+    void add(const std::string &keyword, const std::vector<std::string> &docIDs);
+    std::vector<std::string> search(const std::string &keyword);
+    std::string decryptDocIDFromBase64(const std::string &base64_encrypted_docID);
 };
