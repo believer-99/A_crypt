@@ -1,65 +1,96 @@
 #include "FHE/FHE_utils.hpp"
+#include <openssl/hmac.h>
+#include <openssl/sha.h> // Explicitly include for SHA256_DIGEST_LENGTH
+#include <sstream>
+#include <fstream>
 #include <iostream>
+// #include <omp.h>
+#include "utils/String_utils.h"
 
 using namespace seal;
 
-FHEUtils::FHEUtils() {
-    std::cout << "[+] Initializing FHE Utilities..." << std::endl;
+FHEUtils::FHEUtils(const FHEConfig &config, const std::vector<uint8_t> &mac_key)
+    : mac_key(mac_key)
+{
+    std::cout << "[+] Initializing FHE Utilities with poly_modulus_degree=" << config.poly_modulus_degree
+              << ", plain_modulus_bits=" << config.plain_modulus_bits << std::endl;
 
-    // Set encryption parameters for BFV scheme
     EncryptionParameters parms(scheme_type::bfv);
-    size_t poly_modulus_degree = 8192;
-    parms.set_poly_modulus_degree(poly_modulus_degree);
-    parms.set_coeff_modulus(CoeffModulus::BFVDefault(poly_modulus_degree));
-    parms.set_plain_modulus(PlainModulus::Batching(poly_modulus_degree, 20));
-
-    // Create SEALContext
+    parms.set_poly_modulus_degree(config.poly_modulus_degree);
+    parms.set_coeff_modulus(CoeffModulus::BFVDefault(config.poly_modulus_degree));
+    parms.set_plain_modulus(PlainModulus::Batching(config.poly_modulus_degree, config.plain_modulus_bits));
     context = std::make_shared<SEALContext>(parms);
 
-    // Check if the context is valid
-    if (!context->parameters_set()) {
-        std::cerr << "[!] Error: Invalid SEAL parameters" << std::endl;
+    if (!context->parameters_set())
+    {
         throw std::runtime_error("Invalid SEAL parameters");
     }
 
-    // Create KeyGenerator
     keygen = std::make_unique<KeyGenerator>(*context);
-
-    // Get secret key
     secret_key = keygen->secret_key();
-
-    // Generate public key
     keygen->create_public_key(public_key);
-
-    // Generate relinearization keys for multiplication
     keygen->create_relin_keys(relin_keys);
-
-    // Initialize Encryptor, Decryptor, Evaluator, BatchEncoder
     encryptor = std::make_unique<Encryptor>(*context, public_key);
     decryptor = std::make_unique<Decryptor>(*context, secret_key);
     evaluator = std::make_unique<Evaluator>(*context);
     batch_encoder = std::make_unique<BatchEncoder>(*context);
-
-    std::cout << "[+] FHE Utilities initialized successfully." << std::endl;
 }
 
-seal::Ciphertext FHEUtils::encrypt_vector(const std::vector<uint64_t>& values) {
+std::string FHEUtils::compute_hmac(const seal::Ciphertext &ct)
+{
+    if (mac_key.empty())
+        return "";
+    std::stringstream ss;
+    ct.save(ss);
+    std::string ct_data = ss.str();
+    unsigned char hmac[SHA256_DIGEST_LENGTH];
+    HMAC(EVP_sha256(), mac_key.data(), mac_key.size(),
+         reinterpret_cast<const unsigned char *>(ct_data.c_str()), ct_data.size(), hmac, nullptr);
+    return StringUtils::base64_encode(std::vector<uint8_t>(hmac, hmac + SHA256_DIGEST_LENGTH));
+}
+
+seal::Ciphertext FHEUtils::encrypt(int64_t value, std::string *mac)
+{
     seal::Plaintext plain;
-    batch_encoder->encode(values, plain);
+    std::vector<uint64_t> input(batch_encoder->slot_count(), 0ULL);
+    input[0] = static_cast<uint64_t>(value);
+    batch_encoder->encode(input, plain);
     seal::Ciphertext encrypted;
-    encryptor->encrypt(plain, encrypted);
+#pragma omp parallel
+    {
+#pragma omp single
+        encryptor->encrypt(plain, encrypted);
+    }
+    if (mac && !mac_key.empty())
+        *mac = compute_hmac(encrypted);
     return encrypted;
 }
 
-std::vector<uint64_t> FHEUtils::decrypt_vector(const seal::Ciphertext& encrypted) {
+seal::Ciphertext FHEUtils::encrypt_vector(const std::vector<uint64_t> &values, std::string *mac)
+{
     seal::Plaintext plain;
-    decryptor->decrypt(encrypted, plain);
-    std::vector<uint64_t> result;
-    batch_encoder->decode(plain, result);
-    return result;
+    batch_encoder->encode(values, plain);
+    seal::Ciphertext encrypted;
+#pragma omp parallel
+    {
+#pragma omp single
+        encryptor->encrypt(plain, encrypted);
+    }
+    if (mac && !mac_key.empty())
+        *mac = compute_hmac(encrypted);
+    return encrypted;
 }
 
-int64_t FHEUtils::decrypt(const seal::Ciphertext& encrypted) {
+int64_t FHEUtils::decrypt(const seal::Ciphertext &encrypted, const std::string &mac)
+{
+    if (!mac.empty() && !mac_key.empty())
+    {
+        std::string computed_mac = compute_hmac(encrypted);
+        if (computed_mac != mac)
+        {
+            throw std::runtime_error("HMAC verification failed");
+        }
+    }
     seal::Plaintext plain;
     decryptor->decrypt(encrypted, plain);
     std::vector<uint64_t> decoded;
@@ -67,25 +98,59 @@ int64_t FHEUtils::decrypt(const seal::Ciphertext& encrypted) {
     return static_cast<int64_t>(decoded[0]);
 }
 
-seal::Ciphertext FHEUtils::encrypt(int64_t value) {
+std::vector<uint64_t> FHEUtils::decrypt_vector(const seal::Ciphertext &encrypted, const std::string &mac)
+{
+    if (!mac.empty() && !mac_key.empty())
+    {
+        std::string computed_mac = compute_hmac(encrypted);
+        if (computed_mac != mac)
+        {
+            throw std::runtime_error("HMAC verification failed");
+        }
+    }
     seal::Plaintext plain;
-    std::vector<uint64_t> input(batch_encoder->slot_count(), 0ULL);
-    input[0] = static_cast<uint64_t>(value); // Put the value in the first slot
-    batch_encoder->encode(input, plain);
-    seal::Ciphertext encrypted;
-    encryptor->encrypt(plain, encrypted);
-    return encrypted;
+    decryptor->decrypt(encrypted, plain);
+    std::vector<uint64_t> result;
+    batch_encoder->decode(plain, result);
+    return result;
 }
 
-seal::Ciphertext FHEUtils::add(const seal::Ciphertext& a, const seal::Ciphertext& b) {
+seal::Ciphertext FHEUtils::add(const seal::Ciphertext &a, const seal::Ciphertext &b)
+{
     seal::Ciphertext result;
     evaluator->add(a, b, result);
     return result;
 }
 
-seal::Ciphertext FHEUtils::multiply(const seal::Ciphertext& a, const seal::Ciphertext& b) {
+seal::Ciphertext FHEUtils::multiply(const seal::Ciphertext &a, const seal::Ciphertext &b)
+{
     seal::Ciphertext result;
     evaluator->multiply(a, b, result);
     evaluator->relinearize_inplace(result, relin_keys);
     return result;
+}
+
+seal::Ciphertext FHEUtils::compare_greater(const seal::Ciphertext &a, const seal::Ciphertext &b)
+{
+    seal::Ciphertext diff;
+    evaluator->sub(a, b, diff);
+    seal::Ciphertext result = diff; // Simplified; actual comparison requires polynomial evaluation
+    evaluator->relinearize_inplace(result, relin_keys);
+    return result;
+}
+
+void FHEUtils::save_ciphertext(const seal::Ciphertext &ct, const std::string &file_path)
+{
+    std::ofstream out(file_path, std::ios::binary);
+    ct.save(out);
+    out.close();
+}
+
+seal::Ciphertext FHEUtils::load_ciphertext(const std::string &file_path)
+{
+    std::ifstream in(file_path, std::ios::binary);
+    seal::Ciphertext ct;
+    ct.load(*context, in);
+    in.close();
+    return ct;
 }
